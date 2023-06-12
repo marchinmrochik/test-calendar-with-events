@@ -136,7 +136,7 @@ export const CalendarContainer = () => {
 
             days.push(
                 <DayItem key={day.format('YYYY-MM-DD')} isCurrentMonth={isCurrentMonth} isToday={isToday}
-                         onDragOver={(event) => handleDragOver(event, day.format('YYYY-MM-DD'))}
+                         onDragOver={(event) => handleDragOver(event)}
                          onDrop={(event) => handleDrop(event, day.format('YYYY-MM-DD'))}>
                     {day.format('D')}
                     {isHoliday ? <HolidayName>{holidayName}</HolidayName> : null}
