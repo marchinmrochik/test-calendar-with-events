@@ -1,12 +1,12 @@
 import React from 'react';
-import Calendar from "./Calendar";
+import { PanelContainer, CalendarContainer } from "./containers"
 
 function App() {
-
-
   return (
-    <div >
-      <Calendar/>
+    <div>
+      <h1>Calendar</h1>
+      <PanelContainer/>
+      <CalendarContainer/>
     </div>
   );
 }

@@ -1,12 +1,17 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import moment from 'moment';
 import styled from 'styled-components';
-import axios from "axios";
+import {useAppDispatch, useAppSelector} from "./store/hooks";
+import {fetchHolidays} from "./store/reducers/holidaysReducer";
+import {fetchCountriesCode} from "./store/reducers/countriesCodeReducer";
+import {addLabel, deleteLabel, updateLabel} from "./store/reducers/labelsReducer";
+import {updateEvent, addEvent} from "./store/reducers/eventsReducer";
+import {addCurrentDate} from "./store/reducers/currentDateReducer";
+import { Button } from "./styles";
 
 const CalendarGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 8px;
 `;
 
 const CalendarWeekCell = styled.div`
@@ -18,6 +23,28 @@ const HolidayName = styled.span`
   margin-left: 3px;
 `;
 
+interface SpanLabelProps {
+    color: string
+}
+
+const SpanLabel = styled.span<SpanLabelProps>`
+  display: inline-block;
+  width: 30px;
+  height: 20px;
+  margin-right: 5px;
+  border-radius: 20px;
+  background: ${(props) =>
+          props.color} ;
+  
+  &:last-child {
+    margin-right: 0;
+  }
+`
+
+const Description = styled.div`
+  width: 100%;
+`
+
 interface DayCellProps {
     isCurrentMonth: boolean;
     isToday: boolean;
@@ -26,10 +53,11 @@ interface DayCellProps {
 const DayCell = styled.div<DayCellProps>`
   background-color: ${(props) =>
           props.isCurrentMonth ? (props.isToday ? 'orange' : '#f0f0f0') : '#ccc'};
-  padding: 8px;
+  padding: 8px 0 8px 0;
   height: 100px;
   text-align: left;
   cursor: pointer;
+  border: 0.5px solid;
 `;
 
 const NavigationPanel = styled.div`
@@ -48,30 +76,6 @@ const NavigationPanel = styled.div`
       background-color: #ccc;
     }
   }
-`;
-
-const NavigationBar = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-`;
-
-const NavigationButton = styled.button`
-  background-color: #f0f0f0;
-  border: none;
-  padding: 8px 16px;
-  cursor: pointer;
-  margin-right: 8px;
-
-  &:hover {
-    background-color: #ccc;
-  }
-`;
-
-const SearchInput = styled.input`
-  padding: 8px;
-  margin-right: 8px;
 `;
 
 const Modal = styled.div`
@@ -144,24 +148,107 @@ const EventContainer = styled.div`
 `
 
 interface EventLabelProps {
-    label: string;
+   radiusBorderRight: boolean
 }
 
 const EventLabel = styled.div<EventLabelProps>`
-  background-color: ${(props) =>
-          props.label ? props.label : ''};
-  border-radius: 15px;
+  background-color: olivedrab;
+  border-bottom-right-radius: ${props => props.radiusBorderRight ? '15px' : 0 };
+  border-top-right-radius: ${props => props.radiusBorderRight ? '15px' : 0 };
+  width: ${props => props.radiusBorderRight ? 'calc(100% - 8px)' : '100%'};
   padding: 2px 10px;
   margin-bottom: 5px;
+  box-sizing: border-box;
+`
+
+interface Label {
+    text: string;
+    color: string;
+}
+
+const LabelsContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+`;
+
+const LabelItem = styled.div`
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  margin: 4px;
+  background-color: ${(props) => props.color};
+`;
+
+const LabelText = styled.div`
+  width: calc(100% - 140px);
+`
+
+const LabelForm = styled.div`
+  display: flex;
+  flex-direction: column;
 `
 
 const Calendar = () => {
-    const [currentDate, setCurrentDate] = useState(moment());
-    const [holidays, setHolidays] = useState([]);
-    const [countriesCode, setCountriesCode] = useState([]);
-    const [countryCode, setCountryCode] = useState('');
+    const dispatch = useAppDispatch();
+    const { holidays } = useAppSelector((state) => state.holidays);
+    const { countryCode } = useAppSelector((state) => state.countriesCode);
+    const { labels } = useAppSelector((state) => state.labels);
+    const { events } = useAppSelector((state) => state.events);
+    const { currentDate }  =  useAppSelector((state) => state.currentDate)
+
     const [showModal, setShowModal] = useState(false);
-    const [events, setEvents] = useState([]);
+    const [showModalLabel, setShowModalLabel] = useState(false);
+
+    const [selectedLabels, setSelectedLabels] = useState<Label[]>([]);
+
+    const draggedItem = useRef(null);
+
+    const handleDragStart = (event: React.DragEvent<HTMLDivElement>, item: string) => {
+        // @ts-ignore
+        draggedItem.current = item;
+    };
+
+    const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+    };
+
+    const addElementsToDateArray = (startDate: Date, arrayDate: string[]) => {
+        const newArray: string[] = [];
+
+        let currentDate = new Date(startDate);
+
+        for (let i = 0; i < arrayDate.length; i++) {
+            newArray.push(currentDate.toISOString().substr(0, 10));
+
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+
+        return newArray;
+    };
+
+    const handleDrop = async (event: React.DragEvent<HTMLDivElement>, dayId: any) => {
+        event.preventDefault();
+        const data = await structuredClone(draggedItem.current);
+        if(data) {
+
+            if(data.startDate === data.endDate) {
+                data.startDate = dayId;
+                data.endDate = dayId;
+                data.arrayDate[0] = dayId;
+                data.arrayDate[1] = dayId;
+            }  else {
+                data.startDate = dayId;
+                data.arrayDate = addElementsToDateArray(dayId, data.arrayDate)
+                data.endDate = data.arrayDate.at(-1);
+            }
+
+            // updateEvent
+            // @ts-ignore
+            dispatch(updateEvent(data))
+            // setEvents((prevItems) => prevItems.map((item) => (item.id === data.id ? data : item)))
+            draggedItem.current = null
+        }
+    };
 
     const weekdays = moment.weekdaysShort();
 
@@ -169,7 +256,70 @@ const Calendar = () => {
         return weekdays.map((day) => <CalendarWeekCell key={day}>{day}</CalendarWeekCell>);
     }
 
+    const LabelComponent: React.FC<{ label: Label, id: number }> = ({ label, id }) => {
+        const [isEditing, setIsEditing] = useState(false);
+        const [editedText, setEditedText] = useState(label.text);
+        const [editedColor, setEditedColor] = useState(label.color);
+
+        const handleEdit = () => {
+            setIsEditing(true);
+        };
+
+        const handleSave = () => {
+            dispatch(updateLabel({id, text: editedText, color: editedColor}));
+            setIsEditing(false);
+        };
+
+        const handleDelete = () => {
+            // deleteLabel(id);
+            dispatch(deleteLabel({id}))
+        };
+
+        return (
+            <LabelItem color={label.color}>
+                {isEditing ? (
+                    <>
+                        <input
+                            type="text"
+                            value={editedText}
+                            onChange={(event) => setEditedText(event.target.value)}
+                        />
+                        <input
+                            value={editedColor}
+                            onChange={(event) => setEditedColor(event.target.value)}
+                            type="color"
+                            placeholder="Label Color"
+                        />
+                        <Button type="button" onClick={handleSave}>save</Button>
+                    </>
+                ) : (
+                    <>
+                        <LabelText>{label.text}</LabelText>
+                        <Button type="button" onClick={handleEdit}>edit</Button>
+                        <Button type="button" onClick={handleDelete}>remove</Button>
+                    </>
+                )}
+            </LabelItem>
+        );
+    };
+
+    const handleFormLabelSubmit = (event: any) => {
+        event.preventDefault();
+
+        const text = event.target.text.value;
+        const color = event.target.color.value;
+
+        event.target.reset();
+        dispatch(addLabel({ text, color}));
+    }
+
+    const handleDeleteSelectedLabels = (id: number) => {
+        const updatedLabels = selectedLabels.filter((label, index) => index !== id);
+        setSelectedLabels(updatedLabels);
+    }
+
     const renderCalendarDays = useCallback(() => {
+
         const startDate = currentDate.clone().startOf('month').startOf('week');
         const days = [];
 
@@ -182,19 +332,37 @@ const Calendar = () => {
             // @ts-ignore
             const holidayName = isHoliday ? holidays.find((holiday) => moment(holiday.date, 'YYYY-MM-DD').isSame(day, 'day')).name : null;
             // @ts-ignore
-            const eventsArray = events?.filter((event) => moment(event.date, 'YYYY-MM-DD').isSame(day, 'day'));
+            const eventsArray = events?.filter((event) => {
+                // @ts-ignore
+                if (Array.isArray(event.arrayDate)) {
+                    // @ts-ignore
+                    return event.arrayDate.find((itemDate) => moment(itemDate, 'YYYY-MM-DD').isSame(day, 'day'))
+                }
+            });
 
+            const conditionLongDate = (item: any) => {
+                const checkLongDate = item.startDate !== item.endDate;
+
+                if(checkLongDate) {
+                    return !moment(item.endDate, 'YYYY-MM-DD').isSame(day, 'day')
+                }
+
+                return checkLongDate
+            }
 
             days.push(
-                <DayCell key={day.format('DD-MM-YYYY')} isCurrentMonth={isCurrentMonth} isToday={isToday}
-                         onClick={handleAddEvent}>
+                <DayCell key={day.format('YYYY-MM-DD')} isCurrentMonth={isCurrentMonth} isToday={isToday}
+                         onClick={handleAddEvent} onDragOver={(event) => handleDragOver(event, day.format('YYYY-MM-DD'))}
+                         onDrop={(event) => handleDrop(event, day.format('YYYY-MM-DD'))}>
                     {day.format('D')}
                     {isHoliday ? <HolidayName>{holidayName}</HolidayName> : null}
                     {eventsArray.length ?
                         <EventContainer>
                             {eventsArray.map((item) => {
+                                console.log(item)
                                 // @ts-ignore
-                                return <EventLabel label={item.label}>{item?.description}</EventLabel>
+                                return <EventLabel radiusBorderRight={!conditionLongDate(item)} draggable onDragStart={(event) => handleDragStart(event, item)}> {item.label?.map((item) => <SpanLabel key={item.text} color={item.color}/>)} <Description>{item?.description}</Description>
+                                </EventLabel>
                             })}
                         </EventContainer>
                         : null
@@ -207,107 +375,102 @@ const Calendar = () => {
     }, [currentDate, holidays, events]);
 
     const goToPreviousMonth = () => {
-        setCurrentDate(currentDate.clone().subtract(1, 'month'));
+        dispatch(addCurrentDate({ currentDate: currentDate.clone().subtract(1, 'month') }))
     };
 
     const goToNextMonth = () => {
-        setCurrentDate(currentDate.clone().add(1, 'month'));
+        dispatch(addCurrentDate({ currentDate: currentDate.clone().add(1, 'month') }));
     };
 
     const goToToday = () => {
-        setCurrentDate(moment());
+        dispatch(addCurrentDate({ currentDate: moment()}));
     };
 
     useEffect(() => {
-        const fetchHolidays = async () => {
-            try {
-                const response = await axios.get(`https://date.nager.at/api/v3/NextPublicHolidays/${countryCode}`);
-                setHolidays(response.data);
-            } catch (error) {
-                console.error('Error:', error);
-            }
-        };
-
         if (countryCode) {
-            fetchHolidays();
+            dispatch(fetchHolidays({countryCode, year: currentDate.format('YYYY')}))
         }
 
-    }, [countryCode]);
+    }, [countryCode, currentDate.format('YYYY')]);
 
     useEffect(() => {
-        const getCountries = async () => {
-            try {
-                const response = await axios.get('https://date.nager.at/api/v3/AvailableCountries');
-                const countries = response.data;
-                const {data} = await axios.get('http://ip-api.com/json');
-                setCountriesCode(countries);
-
-                if (countries.some((item: { countryCode: any; }) => item.countryCode === data.countryCode)) {
-                    setCountryCode(data.countryCode)
-                } else {
-                    setCountryCode(countries[0])
-                }
-            } catch (error) {
-                console.error('Error:', error);
-            }
-        };
-
-        getCountries();
+        dispatch(fetchCountriesCode())
     }, []);
 
-    const handleCountryChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-        setCountryCode(event.target.value);
-    };
 
     const handleAddEvent = () => {
         setShowModal(true);
     };
 
     const handleModalClose = () => {
+        setSelectedLabels([]);
         setShowModal(false);
     };
+
+    const checkDifferenceDays = (startDateProps: string, endDateProps: string) => {
+        const startDate = moment(startDateProps);
+        const endDate = moment(endDateProps);
+        const days = [];
+
+        if (startDate.isSame(endDate, 'day')) {
+            days.push(startDate.format('YYYY-MM-DD'));
+        }
+
+        const currentDate = startDate.clone();
+
+        while (currentDate.isSameOrBefore(endDate, 'day')) {
+            days.push(currentDate.format('YYYY-MM-DD'));
+            currentDate.add(1, 'day');
+        }
+
+        return days
+    }
 
     const handleFormSubmit = (event: any) => {
         event.preventDefault();
 
-        const label = event.target.label.value;
+        const label = selectedLabels;
         const description = event.target.description.value;
-        const date = event.target.date.value;
-        const time = event.target.time.value;
+        const startDate = event.target.startDate.value;
+        const startTime = event.target.startTime.value;
+        const endDate = event.target.endDate.value;
+        const endTime = event.target.endTime.value;
+        const arrayDate = checkDifferenceDays(startDate, endDate);
+        const id = events.length + 1;
+        const newEvent = {id, label, description, startDate, startTime, endDate, endTime, arrayDate}
 
-        const newEvent = {label, description, date, time}
-
+        // addEvent
         // @ts-ignore
-        setEvents(prevEvents => [...prevEvents, newEvent]);
+        dispatch(addEvent(newEvent))
+        // setEvents(prevEvents => [...prevEvents, newEvent]);
 
         event.target.reset();
+        setSelectedLabels([]);
         handleModalClose();
+    };
+
+    const handleAddLabels = () => {
+        setShowModalLabel(!showModalLabel)
+    }
+
+    const handleSelectChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+        const selectedLabelText = event.target.value;
+        const selectedLabel = labels.find((label) => label.text === selectedLabelText);
+        const checkDataInArray = !!selectedLabels.find((label) => label.text === selectedLabelText);
+        // @ts-ignore
+        if(!checkDataInArray)  setSelectedLabels([...selectedLabels, selectedLabel]);
     };
 
     return (
         <div>
             <h1>Calendar</h1>
-            <select value={countryCode} onChange={handleCountryChange}>
-                {countriesCode.map((item: { countryCode: string; name: string }) => <option
-                    value={item.countryCode}> {item.name} </option>)
-                }
-            </select>
-            <NavigationBar>
-                <div>
-                    <NavigationButton onClick={goToToday}>Today</NavigationButton>
-                    <NavigationButton onClick={handleAddEvent}>Add Event</NavigationButton>
-                    <NavigationButton>Filters</NavigationButton>
-                    <NavigationButton>Export</NavigationButton>
-                    <NavigationButton>Download</NavigationButton>
-                </div>
-                <div>
-                    <SearchInput type="text" placeholder="Search"/>
-                </div>
-            </NavigationBar>
+
+
             <NavigationPanel>
-                <button onClick={goToPreviousMonth}>Previous month</button>
+                <Button onClick={goToToday}>Today</Button>
+                <Button onClick={goToPreviousMonth}>Previous month</Button>
+                <Button onClick={goToNextMonth}>Next month</Button>
                 <div>{currentDate.format('MMMM YYYY')}</div>
-                <button onClick={goToNextMonth}>Next month</button>
             </NavigationPanel>
             <CalendarGrid>
                 {renderDaysOfWeek()}
@@ -321,23 +484,77 @@ const Calendar = () => {
                             <h2>Create Event </h2>
                             <button onClick={handleModalClose}>x</button>
                         </HeaderModal>
-                        <label>
-                            Label:
-                            <input name='label' type="color"/>
-                        </label>
+                        <LabelForm>
+                            <label>
+                                Label:
+                                <select value={selectedLabels.map((label) => label.text)} onChange={handleSelectChange}>
+                                    <option value="" >Choose label</option>
+                                    {labels.map((label, index) => (
+                                        <option key={index} value={label.text} style={{background: label.color}}>
+                                            {label.text}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                            {
+                                selectedLabels?.map((label, index) => (
+                                <div key={index + label.text}>
+                                    Label: {label.text},
+                                    Color:<input style={{width: 50}} type="color" value={label.color}/>
+                                    <Button type="button" onClick={ () => handleDeleteSelectedLabels(index)}>remove</Button>
+                                </div>))
+                            }
+
+                        </LabelForm>
                         <label>
                             Description:
                             <input name='description' type="text"/>
                         </label>
                         <label>
-                            Date:
-                            <input name='date' type="date"/>
+                            Start Date:
+                            <input name='startDate' type="date"/>
                         </label>
                         <label>
-                            Time:
-                            <input name='time' type="time"/>
+                            End Date:
+                            <input name='endDate' type="date"/>
+                        </label>
+                        <label>
+                            Start Time:
+                            <input name='startTime' type="time"/>
+                        </label>
+
+                        <label>
+                            End Time:
+                            <input name='endTime' type="time"/>
                         </label>
                         <button type="submit">Add Event</button>
+                    </Form>
+                </Modal>
+            )}
+
+            {showModalLabel && (
+                <Modal>
+                    <Form onSubmit={handleFormLabelSubmit}>
+                        <HeaderModal>
+                            <h2>Create Labels</h2>
+                            <button onClick={handleAddLabels}>x</button>
+                        </HeaderModal>
+                        <div>
+                            <input
+                                type="text"
+                                name='text'
+                            />
+                            <input
+                                type="color"
+                                name="color"
+                            />
+                            <Button type='submit' >Add Label</Button>
+                        </div>
+                        <LabelsContainer>
+                            {labels.map((label, index) => (
+                                <LabelComponent key={index} id={index} label={label} />
+                            ))}
+                        </LabelsContainer>
                     </Form>
                 </Modal>
             )}
